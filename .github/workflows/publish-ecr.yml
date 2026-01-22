@@ -57,6 +57,31 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # =======================================================================
+      # Build mifos-security-plugin for OIDC/Zitadel integration
+      # Per: Mifos X Technical Manual for OIDC (Zitadel) v2.0
+      # =======================================================================
+      - name: Clone mifos-security-plugin
+        run: |
+          git clone https://github.com/openMF/mifos-security-plugin.git /tmp/mifos-security-plugin
+          cd /tmp/mifos-security-plugin
+          git log -1 --oneline
+
+      - name: Build mifos-security-plugin
+        run: |
+          cd /tmp/mifos-security-plugin
+          ./mvnw -Dmaven.test.skip=true clean package
+          ls -la target/*.jar
+
+      - name: Prepare Jib extraDirectories for plugin
+        run: |
+          # Create directory structure for Jib extraDirectories
+          # This will be merged into the container image at /app/plugins/
+          mkdir -p jib-extra/app/plugins
+          cp /tmp/mifos-security-plugin/target/*.jar jib-extra/app/plugins/
+          echo "Plugin JARs to be included:"
+          ls -la jib-extra/app/plugins/
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
@@ -100,10 +125,13 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
+          # Build and push with mifos-security-plugin included via extraDirectories
           ./gradlew --no-daemon --console=plain :fineract-provider:jib -x test -x cucumber \
             -Djib.to.image=${ECR_REGISTRY}/${ECR_REPOSITORY} \
             -Djib.to.tags=${{ steps.meta.outputs.tags }} \
-            -Djib.from.platforms=linux/amd64,linux/arm64
+            -Djib.from.platforms=linux/amd64,linux/arm64 \
+            -Djib.extraDirectories.paths=jib-extra \
+            -Djib.extraDirectories.permissions=/app/plugins/*=644
 
       - name: Output Summary
         run: |
